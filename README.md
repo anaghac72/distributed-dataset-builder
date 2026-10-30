@@ -8,7 +8,7 @@ This project aims to build a distributed pipeline for continuously ingesting, va
 
 The system uses Apache Kafka for event-based ingestion and tracks file metadata and processing status using SQLite.
 
-## 2. My Contribution – Person 1: Anagha C
+## 2.  Person 1: Anagha C
 
 **Role: Ingestion and Integration**
 

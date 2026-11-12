@@ -166,7 +166,7 @@ GitHub: https://github.com/anaghac72/distributed-dataset-builder
 ## 9. Authors
 
 **Anagha C**  
- Ingestion and Integration
+ Ingestion and Integration/n
 **Akash S**
 
 

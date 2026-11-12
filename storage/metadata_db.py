@@ -78,7 +78,11 @@ def initialize_database():
                 ALTER TABLE media_files
                 ADD COLUMN content_hash TEXT
             """)
-
+        if "perceptual_hash" not in existing_columns:
+            connection.execute("""
+                ALTER TABLE media_files
+                ADD COLUMN perceptual_hash TEXT
+            """)
         connection.execute("""
             CREATE INDEX IF NOT EXISTS idx_content_hash
             ON media_files(content_hash)
@@ -138,6 +142,33 @@ def save_content_hash(sample_id, content_hash):
             current_time(),
             sample_id
         ))
+
+def save_perceptual_hash(sample_id, perceptual_hash):
+    with get_connection() as connection:
+        connection.execute("""
+            UPDATE media_files
+            SET perceptual_hash = ?,
+                updated_at = ?
+            WHERE sample_id = ?
+        """, (
+            perceptual_hash,
+            current_time(),
+            sample_id,
+        ))
+
+
+def get_image_perceptual_hashes(source_path):
+    with get_connection() as connection:
+        rows = connection.execute("""
+            SELECT filename, perceptual_hash
+            FROM media_files
+            WHERE media_type = 'image'
+              AND perceptual_hash IS NOT NULL
+              AND source_path != ?
+            ORDER BY id ASC
+        """, (str(source_path),)).fetchall()
+
+    return rows
 
 
 # --------------------------------------------------
@@ -315,7 +346,8 @@ def get_all_media():
                    received_at,
                    status,
                    output_path,
-                   updated_at
+                   updated_at,
+                   perceptual_hash
             FROM media_files
             ORDER BY id DESC
         """).fetchall()

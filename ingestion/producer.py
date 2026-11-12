@@ -1,4 +1,3 @@
-
 import json
 import time
 import uuid
@@ -7,15 +6,21 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from storage.metadata_db import (
+    calculate_file_hash,
+    get_image_perceptual_hashes,
     initialize_database,
     insert_media,
-    mark_kafka_published,
-    calculate_file_hash,
     is_hash_already_published,
+    mark_kafka_published,
     save_content_hash,
+    save_perceptual_hash,
 )
-
 from kafka_integration.kafka_producer import ImageKafkaProducer
+from validation.deduplication import (
+    IMAGE_EXTENSIONS,
+    calculate_perceptual_hash,
+    find_similar_hash,
+)
 from validation.file_validator import validate_media
 
 
@@ -118,6 +123,7 @@ def run_producer():
     # during one producer session.
     hash_cache = {}
     validation_cache = {}
+    perceptual_cache = {}
 
     print("=" * 60)
     print("DISTRIBUTED DATASET BUILDER")
@@ -185,6 +191,34 @@ def run_producer():
 
                         continue
 
+                    perceptual_hash_value = None
+
+                    if file_path.suffix.lower() in IMAGE_EXTENSIONS:
+                        if signature not in perceptual_cache:
+                            candidate_hash = calculate_perceptual_hash(file_path)
+                            similar_image = find_similar_hash(
+                                candidate_hash,
+                                get_image_perceptual_hashes(source_path),
+                            )
+                            perceptual_cache[signature] = (
+                                str(candidate_hash),
+                                similar_image,
+                            )
+
+                        perceptual_hash_value, similar_image = (
+                            perceptual_cache[signature]
+                        )
+
+                        if similar_image:
+                            similar_filename, distance = similar_image
+                            print(
+                                f"Visually similar image skipped: "
+                                f"{file_path.name} resembles "
+                                f"{similar_filename} "
+                                f"(pHash distance: {distance})"
+                            )
+                            continue
+
                     # Reuse event after a failed Kafka publish.
                     if signature not in pending_events:
 
@@ -199,6 +233,12 @@ def run_producer():
                             event["sample_id"],
                             content_hash
                         )
+
+                        if perceptual_hash_value is not None:
+                            save_perceptual_hash(
+                                event["sample_id"],
+                                perceptual_hash_value,
+                            )
 
                         pending_events[signature] = event
 

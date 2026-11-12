@@ -34,6 +34,16 @@ def calculate_perceptual_hash(file_path):
         image.load()
         return imagehash.phash(image.convert("RGB"))
 
+def find_similar_hash(candidate_hash, known_hashes):
+    """Return the first image within the pHash similarity threshold."""
+    for filename, stored_hash in known_hashes:
+        distance = candidate_hash - imagehash.hex_to_hash(stored_hash)
+
+        if distance <= SIMILARITY_THRESHOLD:
+            return filename, distance
+
+    return None
+
 
 def find_duplicates():
     if not INCOMING_DIR.exists():

@@ -11,6 +11,7 @@ PROJECT_DIR = Path(__file__).resolve().parent
 DATA_DIR = PROJECT_DIR / "data"
 INCOMING_DIR = DATA_DIR / "incoming"
 PROCESSED_DIR = DATA_DIR / "processed"
+PROCESSED_VIDEO_FRAMES_DIR = PROCESSED_DIR / "videos"
 DATABASE_PATH = DATA_DIR / "metadata.db"
 OUTPUT_DIR = DATA_DIR / "dataset_output"
 MANIFEST_PATH = OUTPUT_DIR / "manifest.json"
@@ -22,7 +23,9 @@ st.set_page_config(
 )
 
 st.title("🗂️ Distributed Dataset Builder")
-st.caption("Image ingestion, processing, deduplication and dataset sharding")
+st.caption(
+    "Image ingestion, sampled video-frame processing, deduplication and sharding"
+)
 
 # Count files in each folder.
 def count_files(folder, extensions=None):
@@ -49,6 +52,15 @@ incoming_count = count_files(
 processed_count = count_files(PROCESSED_DIR, {".jpg", ".jpeg", ".png"})
 incoming_images = count_files(INCOMING_DIR, image_extensions)
 incoming_videos = count_files(INCOMING_DIR, video_extensions)
+processed_video_frames = (
+    sum(
+        1
+        for path in PROCESSED_VIDEO_FRAMES_DIR.rglob("*.jpg")
+        if path.is_file()
+    )
+    if PROCESSED_VIDEO_FRAMES_DIR.exists()
+    else 0
+)
 
 # Load database records, if available.
 records = []
@@ -74,11 +86,12 @@ if MANIFEST_PATH.exists():
 
 st.subheader("Dataset overview")
 
-col1, col2, col3, col4 = st.columns(4)
+col1, col2, col3, col4, col5 = st.columns(5)
 col1.metric("Incoming media", incoming_count)
 col2.metric("Incoming images", incoming_images)
 col3.metric("Incoming videos", incoming_videos)
 col4.metric("Processed images", processed_count)
+col5.metric("Extracted video frames", processed_video_frames)
 
 st.divider()
 

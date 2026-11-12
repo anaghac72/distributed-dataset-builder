@@ -143,13 +143,24 @@ needed.
 4. Valid, new ingestion events are published to the Kafka topic.
 5. Kafka consumers receive the ingestion events.
 6. SQLite stores metadata and processing status.
-7. The processing modules handle the received image files.
+7. Ray resizes images and extracts up to five evenly sampled, 224x224 frames
+   from each video. The video frame paths and extraction details are saved in
+   a JSON manifest, whose path is recorded in SQLite.
+8. The image sharder packages processed images into train/validation/test TAR
+   shards. Extracted video frames are not included in image shards yet.
 
-**Note:** The current tested ingestion workflow focuses on images. Video processing and complete end-to-end video integration require further implementation and testing.
+**Note:** Video support currently extracts a small number of frames for
+development and testing; it does not re-encode complete videos.
 
 ## 7. Testing
 
 The ingestion module was tested with sample image files and newly arriving files.
+Focused video-processing tests verify sampled frame extraction, resizing, and
+manifest output. Run the tests with:
+
+```bash
+.venv/bin/python -m unittest discover -s tests
+```
 
 The tests covered:
 

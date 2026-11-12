@@ -14,6 +14,7 @@ from storage.metadata_db import (
     update_media_status,
     get_successful_output,
 )
+from processing.video_processor import process_video_once
 
 
 # --------------------------------------------------
@@ -23,6 +24,7 @@ from storage.metadata_db import (
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 
 OUTPUT_DIR = PROJECT_DIR / "data" / "processed"
+VIDEO_OUTPUT_DIR = OUTPUT_DIR / "videos"
 
 KAFKA_TOPIC = "image-ingestion"
 KAFKA_SERVER = "localhost:9092"
@@ -102,12 +104,39 @@ def process_image_task(input_path, output_path):
         }
 
 
+@ray.remote
+def process_video_task(input_path, output_dir):
+    """Extract sampled frames from a video with retry support."""
+    try:
+        result = run_with_retries(
+            operation_name="video_frame_extraction",
+            item=input_path,
+            operation=lambda: process_video_once(
+                input_path,
+                output_dir,
+            ),
+        )
+
+        return {
+            "filename": Path(input_path).name,
+            "status": "SUCCESS",
+            "output": result["manifest_path"],
+            "frame_count": result["frame_count"],
+        }
+    except Exception as error:
+        return {
+            "filename": Path(input_path).name,
+            "status": "FAILED",
+            "error": str(error),
+        }
+
+
 # --------------------------------------------------
 # EVENT VALIDATION
 # --------------------------------------------------
 
 def validate_event(event):
-    """Check whether a Kafka message contains valid image metadata."""
+    """Check whether a Kafka message contains supported media metadata."""
 
     required_fields = [
         "sample_id",
@@ -124,7 +153,7 @@ def validate_event(event):
     if not all(field in event for field in required_fields):
         return False
 
-    if event["media_type"] != "image":
+    if event["media_type"] not in ("image", "video"):
         return False
 
     return True
@@ -139,7 +168,7 @@ def process_event(event):
     # Step 1: Validate the event.
     if not validate_event(event):
 
-        print("Invalid image event. Skipping.")
+        print("Invalid or unsupported media event. Skipping.")
 
         # Invalid messages are treated as poison messages.
         # The consumer will commit their offsets.
@@ -159,8 +188,6 @@ def process_event(event):
         exist_ok=True
     )
 
-    output_path = OUTPUT_DIR / f"{input_path.stem}.jpg"
-
     # Step 3: Insert metadata into SQLite.
     is_new_event = insert_media(event)
 
@@ -172,7 +199,7 @@ def process_event(event):
 
     if existing_output:
 
-        print("Duplicate image detected. Skipping Ray processing.")
+        print("Media was already processed. Skipping Ray processing.")
 
         print("Existing output:", existing_output)
 
@@ -192,15 +219,22 @@ def process_event(event):
         sample_id=event["sample_id"],
     )
 
-    print("Submitting image to Ray:", input_path.name)
-
-    # Step 6: Submit the image to a Ray worker.
-    result = ray.get(
-        process_image_task.remote(
+    if event["media_type"] == "image":
+        output_path = OUTPUT_DIR / f"{input_path.stem}.jpg"
+        print("Submitting image to Ray:", input_path.name)
+        task = process_image_task.remote(
             str(input_path),
-            str(output_path)
+            str(output_path),
         )
-    )
+    else:
+        output_dir = VIDEO_OUTPUT_DIR / event["sample_id"]
+        print("Submitting video to Ray:", input_path.name)
+        task = process_video_task.remote(
+            str(input_path),
+            str(output_dir),
+        )
+
+    result = ray.get(task)
 
     print("Processing result:", result)
 
@@ -214,7 +248,13 @@ def process_event(event):
             sample_id=event["sample_id"],
         )
 
-        print("Image processed successfully!")
+        if event["media_type"] == "video":
+            print(
+                "Video processed successfully; extracted frames:",
+                result["frame_count"],
+            )
+        else:
+            print("Image processed successfully!")
 
     else:
 

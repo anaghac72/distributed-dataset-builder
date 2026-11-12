@@ -99,8 +99,8 @@ st.subheader("Metadata database")
 col1, col2 = st.columns(2)
 col1.metric("Recorded media", len(records))
 col2.metric(
-    "Dataset total",
-    manifest.get("total_images", 0) if manifest else 0,
+    "Dataset samples",
+    manifest.get("total_samples", 0) if manifest else 0,
 )
 
 if records:
@@ -122,6 +122,8 @@ if manifest:
         split_data.append({
             "Split": split_name,
             "Images": details.get("image_count", 0),
+            "Video frames": details.get("video_frame_count", 0),
+            "Total samples": details.get("sample_count", 0),
             "Shards": details.get("shard_count", 0),
         })
 
@@ -130,7 +132,7 @@ if manifest:
         st.dataframe(split_df, use_container_width=True)
 
         st.bar_chart(
-            split_df.set_index("Split")[["Images"]]
+            split_df.set_index("Split")[["Images", "Video frames"]]
         )
 else:
     st.info(

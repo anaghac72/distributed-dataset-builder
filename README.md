@@ -146,8 +146,10 @@ needed.
 7. Ray resizes images and extracts up to five evenly sampled, 224x224 frames
    from each video. The video frame paths and extraction details are saved in
    a JSON manifest, whose path is recorded in SQLite.
-8. The image sharder packages processed images into train/validation/test TAR
-   shards. Extracted video frames are not included in image shards yet.
+8. The dataset sharder packages processed images and extracted video frames
+   into train/validation/test TAR shards. It keeps all frames from a source
+   video in one split and records each frame's source video and frame index in
+   the dataset manifest.
 
 **Note:** Video support currently extracts a small number of frames for
 development and testing; it does not re-encode complete videos.

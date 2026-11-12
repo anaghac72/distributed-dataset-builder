@@ -163,7 +163,10 @@ The tests covered:
 
 GitHub: https://github.com/anaghac72/distributed-dataset-builder
 
-## 9. Author
+## 9. Authors
 
 **Anagha C**  
-Person 1 – Ingestion and Integration
+ Ingestion and Integration
+**Akash S**
+
+

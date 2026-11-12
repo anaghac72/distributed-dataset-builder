@@ -41,6 +41,7 @@ My responsibilities include:
 distributed-dataset-builder/
 ├── ingestion/
 ├── kafka_integration/
+├── orchestration/
 ├── processing/
 ├── recovery/
 ├── storage/
@@ -49,6 +50,7 @@ distributed-dataset-builder/
 ├── data/
 ├── app.py
 ├── docker-compose.yml
+├── docker-compose.storage.yml
 ├── requirements.txt
 └── README.md
 ```
@@ -154,7 +156,40 @@ needed.
 **Note:** Video support currently extracts a small number of frames for
 development and testing; it does not re-encode complete videos.
 
-## 7. Testing
+## 7. Orchestration and Failure Handling
+
+The Kafka worker processes media as ingestion events arrive. To automatically
+rebuild dataset shards when new media reaches `SUCCESS`, start the scheduler in
+a separate terminal:
+
+```bash
+source .venv/bin/activate
+python -m orchestration.dataset_scheduler
+```
+
+It checks SQLite every 30 seconds, rebuilds shards when the latest successful
+media changes, and saves its cursor in `data/orchestration/sharder_state.json`.
+To perform one check and exit, run:
+
+```bash
+python -m orchestration.dataset_scheduler --once
+```
+
+The worker retries image/video processing using the retry manager. If an event
+is invalid or processing still fails, the worker publishes the event and error
+details to `image-ingestion-dlq`. It commits the original Kafka offset only
+after the broker acknowledges the dead-letter record. If the dead-letter
+publish fails, the source offset is left uncommitted for redelivery. Inspect
+the dead-letter topic with a Kafka consumer or your Kafka UI.
+
+The laptop Compose configuration is a development setup: it has one Kafka
+broker, so its topics (including the dead-letter topic) have replication factor
+1. SeaweedFS is also a single-node optional service. Neither protects data from
+loss of the laptop or its disk. Production storage replication remains pending
+until deployment on multiple independent server nodes with a configured
+replication policy and tested recovery procedure.
+
+## 8. Testing
 
 The ingestion module was tested with sample image files and newly arriving files.
 Focused video-processing tests verify sampled frame extraction, resizing, and
@@ -172,12 +207,12 @@ The tests covered:
 - Metadata tracking in SQLite.
 - Integration with the processing workflow.
 
-## 8. Repository
+## 9. Repository
 
 GitHub: https://github.com/anaghac72/distributed-dataset-builder
 
 
-## 9. Authors
+## 10. Authors
 
 - **Anagha C** — Person 1: Ingestion and Integration
 - **Akash S** — Person 2: Pipeline Development and Validation

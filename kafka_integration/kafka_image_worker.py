@@ -3,10 +3,15 @@ import json
 from pathlib import Path
 
 import ray
-from kafka import KafkaConsumer
+from kafka import KafkaConsumer, KafkaProducer
 from PIL import Image, ImageOps
 
 from recovery.retry_manager import run_with_retries
+from recovery.dead_letter import (
+    build_dead_letter_record,
+    deserialize_event,
+    publish_dead_letter,
+)
 
 from storage.metadata_db import (
     initialize_database,
@@ -27,6 +32,7 @@ OUTPUT_DIR = PROJECT_DIR / "data" / "processed"
 VIDEO_OUTPUT_DIR = OUTPUT_DIR / "videos"
 
 KAFKA_TOPIC = "image-ingestion"
+DEAD_LETTER_TOPIC = "image-ingestion-dlq"
 KAFKA_SERVER = "localhost:9092"
 
 TARGET_SIZE = (224, 224)
@@ -156,6 +162,18 @@ def validate_event(event):
     if event["media_type"] not in ("image", "video"):
         return False
 
+    if not isinstance(event["sample_id"], str) or not event["sample_id"]:
+        return False
+
+    if not isinstance(event["source_path"], str) or not event["source_path"]:
+        return False
+
+    if (
+        not isinstance(event["file_size_bytes"], int)
+        or event["file_size_bytes"] < 0
+    ):
+        return False
+
     return True
 
 
@@ -167,12 +185,7 @@ def process_event(event):
 
     # Step 1: Validate the event.
     if not validate_event(event):
-
-        print("Invalid or unsupported media event. Skipping.")
-
-        # Invalid messages are treated as poison messages.
-        # The consumer will commit their offsets.
-        return
+        raise ValueError("Invalid or unsupported media event.")
 
     input_path = Path(event["source_path"])
 
@@ -269,6 +282,40 @@ def process_event(event):
         )
 
 
+def handle_message(consumer, dead_letter_producer, message):
+    event = message.value
+
+    print("\n--------------------------------")
+    print("Received Kafka event:")
+    print(event)
+    print("--------------------------------")
+
+    try:
+        process_event(event)
+    except Exception as error:
+        dead_letter_record = build_dead_letter_record(
+            event=event,
+            error=error,
+            source_topic=message.topic,
+            source_partition=message.partition,
+            source_offset=message.offset,
+        )
+        publish_dead_letter(
+            dead_letter_producer,
+            DEAD_LETTER_TOPIC,
+            dead_letter_record,
+        )
+        print(
+            "Failure recorded in dead-letter topic; "
+            "committing source offset."
+        )
+    else:
+        print("Media processing succeeded.")
+
+    consumer.commit()
+    print("Kafka offset committed.")
+
+
 # --------------------------------------------------
 # KAFKA CONSUMER
 # --------------------------------------------------
@@ -291,6 +338,7 @@ def start_worker():
     )
 
     consumer = None
+    dead_letter_producer = None
 
     try:
 
@@ -305,9 +353,13 @@ def start_worker():
 
             group_id="image-processing-worker",
 
-            value_deserializer=lambda message: json.loads(
-                message.decode("utf-8")
-            ),
+            value_deserializer=deserialize_event,
+        )
+        dead_letter_producer = KafkaProducer(
+            bootstrap_servers=[KAFKA_SERVER],
+            value_serializer=lambda value: json.dumps(value).encode("utf-8"),
+            acks="all",
+            retries=3,
         )
 
         print("\nKafka image worker started.")
@@ -317,33 +369,7 @@ def start_worker():
         print("Waiting for image events...\n")
 
         for message in consumer:
-
-            event = message.value
-
-            print("\n--------------------------------")
-            print("Received Kafka event:")
-            print(event)
-            print("--------------------------------")
-
-            try:
-
-                process_event(event)
-
-                # Commit only after successful processing
-                # or intentional handling of an invalid event.
-                consumer.commit()
-
-                print("Kafka offset committed.")
-
-            except Exception as error:
-
-                print("Event processing failed:", error)
-
-                print("Kafka offset NOT committed.")
-
-                # Stop the worker so the failed event can be
-                # retried when the worker is restarted.
-                raise
+            handle_message(consumer, dead_letter_producer, message)
 
     except KeyboardInterrupt:
 
@@ -354,14 +380,18 @@ def start_worker():
         print("\nKafka worker encountered an error:", error)
 
     finally:
-
-        if consumer is not None:
-            consumer.close()
-
-        if ray.is_initialized():
-            ray.shutdown()
-
-        print("Kafka and Ray connections closed.")
+        try:
+            if consumer is not None:
+                consumer.close()
+        finally:
+            try:
+                if dead_letter_producer is not None:
+                    dead_letter_producer.flush()
+                    dead_letter_producer.close()
+            finally:
+                if ray.is_initialized():
+                    ray.shutdown()
+                print("Kafka and Ray connections closed.")
 
 
 # --------------------------------------------------

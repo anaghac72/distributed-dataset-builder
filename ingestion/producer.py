@@ -16,6 +16,7 @@ from storage.metadata_db import (
 )
 
 from kafka_integration.kafka_producer import ImageKafkaProducer
+from validation.file_validator import validate_media
 
 
 # --------------------------------------------------
@@ -83,6 +84,19 @@ def is_file_ready(file_path):
         return False
 
 
+def is_valid_media(file_path):
+    result = validate_media(file_path)
+
+    if not result["valid"]:
+        print(
+            f"Media validation failed for {file_path.name}: "
+            f"{result['message']}"
+        )
+        return False
+
+    return True
+
+
 # --------------------------------------------------
 # CONTINUOUS KAFKA INGESTION
 # --------------------------------------------------
@@ -103,6 +117,7 @@ def run_producer():
     # Avoid recalculating the same file hash repeatedly
     # during one producer session.
     hash_cache = {}
+    validation_cache = {}
 
     print("=" * 60)
     print("DISTRIBUTED DATASET BUILDER")
@@ -141,6 +156,14 @@ def run_producer():
                         file_stat.st_size,
                         file_stat.st_mtime_ns
                     )
+
+                    if signature not in validation_cache:
+                        validation_cache[signature] = is_valid_media(
+                            file_path
+                        )
+
+                    if not validation_cache[signature]:
+                        continue
 
                     # Reuse a hash when the file version is unchanged.
                     if signature not in hash_cache:

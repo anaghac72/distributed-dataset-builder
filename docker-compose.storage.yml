@@ -1,0 +1,16 @@
+services:
+  seaweedfs:
+    image: chrislusf/seaweedfs:4.53
+    container_name: dataset-seaweedfs
+    ports:
+      - "127.0.0.1:8333:8333"
+    environment:
+      AWS_ACCESS_KEY_ID: ${SEAWEEDFS_ACCESS_KEY:?Set SEAWEEDFS_ACCESS_KEY in .env}
+      AWS_SECRET_ACCESS_KEY: ${SEAWEEDFS_SECRET_KEY:?Set SEAWEEDFS_SECRET_KEY in .env}
+      S3_BUCKET: ${SEAWEEDFS_BUCKET:-dataset}
+    volumes:
+      - seaweedfs_data:/data
+    restart: unless-stopped
+
+volumes:
+  seaweedfs_data:

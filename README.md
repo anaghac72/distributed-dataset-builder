@@ -82,18 +82,65 @@ For Windows PowerShell:
 pip install -r requirements.txt
 ```
 
-### Step 5: Start Kafka using Docker Compose
+### Step 5: Start the laptop development setup
+
+On a laptop, start Kafka only. SeaweedFS is intentionally kept out of the
+default Compose setup so it does not use disk or memory when you are developing
+without object storage.
 
 ```bash
+docker compose config
 docker compose up -d
+docker compose ps
 ```
+
+Use a small number of sample images in `data/incoming` for local tests. Kafka
+stores its data in the `kafka_data` Docker volume; it does not download the
+dataset for you.
+
+### Optional: Start SeaweedFS object storage
+
+Use this only on a server or when you specifically need S3-compatible storage.
+Create or update `.env` with unique credentials (do not commit or share it):
+
+```dotenv
+SEAWEEDFS_ACCESS_KEY=replace_with_a_unique_access_key
+SEAWEEDFS_SECRET_KEY=replace_with_a_long_random_secret
+SEAWEEDFS_BUCKET=dataset
+```
+
+Generate a secret with `openssl rand -hex 32` and restrict `.env` permissions
+with `chmod 600 .env`. Start SeaweedFS alongside Kafka using the storage Compose
+file:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.storage.yml config
+docker compose -f docker-compose.yml -f docker-compose.storage.yml up -d
+docker compose -f docker-compose.yml -f docker-compose.storage.yml ps
+docker compose -f docker-compose.yml -f docker-compose.storage.yml logs --tail=100 seaweedfs
+```
+
+SeaweedFS's S3 endpoint is `http://127.0.0.1:8333` on the server, and the
+default bucket created at startup is `dataset`. Port 8333 is bound to loopback
+so it is not publicly exposed. If your application runs in another container
+on this Compose network, use `http://seaweedfs:8333` as its endpoint. For remote
+clients, use a secured tunnel or TLS reverse proxy rather than opening the S3
+port directly to the internet.
+
+The Python pipeline currently reads and writes local files; a separate S3
+integration change is needed before it stores media in SeaweedFS. The previous
+MinIO volume is not migrated or deleted by this configuration. Back up or copy
+any MinIO data you need before removing the old volume; do not use
+`docker compose down -v` until you have confirmed the old data is no longer
+needed.
 
 ## 6. Ingestion Workflow
 
 1. New files are placed in the incoming directory.
-2. The Python producer monitors the directory for new files.
+2. The Python producer monitors the directory and validates each new media
+   file before ingestion.
 3. SHA-256 hashing helps identify duplicate file content.
-4. New ingestion events are published to the Kafka topic.
+4. Valid, new ingestion events are published to the Kafka topic.
 5. Kafka consumers receive the ingestion events.
 6. SQLite stores metadata and processing status.
 7. The processing modules handle the received image files.
